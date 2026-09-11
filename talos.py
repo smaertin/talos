@@ -2,8 +2,26 @@ from pyvisa import ResourceManager,constants
 from Netio import Netio as net
 from time import sleep
 
+# ----------------------------------------------------#
+#   Functions for the ESMO Talos2.0 Package Handler   #
+#                                                     #      
+#      |====================================|         #      
+#      | currently implemented as functions |         #      
+#      |   after testing will be adapted    |         #  
+#      |  to a class "Talos" with methods   |         #  
+#      |====================================|         #  
+# ----------------------------------------------------#
 
-def querySite(inst):
+
+
+def querySite():
+    '''
+    Check if the Site is ready (Package and thermohead in place)
+    
+    Input: ~ 
+    Output: site -> Boolean
+    '''
+    
     site=False
     status = str(inst.query("CRT?"))
     print(status)
@@ -15,26 +33,40 @@ def querySite(inst):
     return site
 
 def updateCache(status):
-    path = "C:/Users/saschama/Desktop/Talos/cache"
+    '''
+    Writes site status into file
+    
+    Input: status -> Boolean
+    Output: ~
+    '''
+    
+    path = "./cache"
     with open(path+"sitestatus.txt","w") as f:
         f.write(status)
     return
-def checkBoardPwr(n):
+
+def checkBoardPwr():
+    '''
+    Check for powerstates of the Netio-PowerStrip
+    
+    Input: ~
+    Output: List(states) -> Boolean
+    '''
+    
     outputs = n.get_outputs()
     states = [outputs[i].State for i in range(len(outputs))]
-    
     return states
 
-def controlBoardPwr(n,newstate):
+def controlBoardPwr(newstate):
     '''
-        function to control the powerline from Netio
-        Input:
-        newstate=0 : turn OFF
-        newstate=1 : turn ON
-        newstate=2 : toggle to the other state
-        
-        Return:
-        None
+    Control the powerline from Netio
+    
+    Input: 
+    newstate=0 : turn OFF
+    newstate=1 : turn ON
+    newstate=2 : toggle to the other state
+    
+    Output: ~
     '''
     
     if newstate==0:
@@ -51,9 +83,16 @@ def controlBoardPwr(n,newstate):
         n.set_output(3,net.ACTION.TOGGLE)
         
     sleep(2) #arbiträre Zeit die gewartet wird bis steckdose angeschalltet sein sollte
-    return None 
+    return  
 
-def start_handling(inst,n):
+def start_handling():
+    '''
+    Start of handling process - Start signal and stop program until site is ready; Power to the Board is enabled
+    
+    Input: ~ 
+    Output: ready -> boolean
+    '''
+    
     stat_Socket = False
     ready = False
     print(inst.query("TMP?"))
@@ -61,37 +100,51 @@ def start_handling(inst,n):
     print("Waiting for SRQ")
     inst.wait_for_srq(None)
     print("SRQ has been received")
-    stat_Socket = querySite(inst) #wird nur ausgeführt wenn SRQ eingegangen ist
+    stat_Socket = querySite() #wird nur ausgeführt wenn SRQ eingegangen ist
     ready = True
     if stat_Socket:
-        controlBoardPwr(n,1)
-        stat_Board = checkBoardPwr(n)
+        controlBoardPwr(1)
+        stat_Board = checkBoardPwr()
         if all(stat_Board) == 1:
             ready = True
     return ready
 
 def initialize(temp,debug):
-    # global inst, n
-    global inst
+    '''
+    Configuration of the system
+    
+    Input: 
+        List(temp) -> float
+        debug -> boolean
+    
+    Output:
+        inst -> object
+        n -> object
+    '''
+    
+    global inst, n 
     
     #Initialize the Instrument -> Talos
     rm = ResourceManager()
-    address = "GPIB0::3::INSTR"
+    address = "GPIB0::3::INSTR" #change when needed
     
     # ID fragen -- vergleichen -- errorhandling    
     try:
         inst = rm.open_resource(address)
         print("Instument has ben initialized correctly")
     except:
-        raise Exception("Check Connection or GPIB-Address.")
+        raise Exception("Check Connection or GPIB-Address (in function 'initialize')")
+    # setup of the communication, ensures no timeout until srq is received during handling
     inst.read_termination = "\r\n"
     inst.write_termination = "\r\n"
     inst.query_delay = 0.5
     inst.timeout = None
     
+    
     if not temp:
         inst.query("TMPM 1,amb")
     else:
+        #set mode to temperature, needed to change temperatures later on
         inst.query("TMPM 1,tmp")
 
     # test_mode = inst.query("TestMode?")
@@ -116,16 +169,17 @@ def initialize(temp,debug):
     except:
         raise Exception("Check for correct IP, User, Pw, Ethernet-Connection")
     
-    stat_Board = checkBoardPwr(n)
+    # ensures board is shut down
+    stat_Board = checkBoardPwr()
     print(f"Current Status Power: {stat_Board}")
     if any(stat_Board) == 1:
         print("Shutting off Power")
-        controlBoardPwr(n,0)
-        stat_Board = checkBoardPwr(n)
+        controlBoardPwr(0)
+        stat_Board = checkBoardPwr()
         print(f"Current Status Power: {stat_Board}")
         
         if any(stat_Board) == 1:
-            raise Exception("Plug Connector not shut off correctly - Check Status")
+            raise Exception("Power Strip is not shut off correctly - Check Status")
         
     
     #Loading the correct recipe
@@ -142,19 +196,26 @@ def initialize(temp,debug):
     # return inst,n
     return inst,n
 
-def end_of_cycle(inst,n, BIN: int, eot: bool):
+def end_of_cycle(BIN: int, eot: bool):
     '''
-    BIN: bin-class in which to sort the sample, acts as continue-command for Talos
-    debug: When debug-mode is enabled, Talos ends the process after handling current sample (states: 1|0)
-    eot: (states: 1|0) set to 1 when # of planned testsamples have been handled
+    Controlls the events after the test has been concluded
+    
+    Input:
+        BIN: bin-class in which to sort the sample, acts as continue-command for Talos -> int
+        
+        eot: (states: 1|0) set to 1 when # of planned testsamples have been handled -> boolean
+        
+    Output: ~
+    
     '''
+    #correct formating
     bin_class = str(BIN)
     if len(bin_class)<2:
         bin_class = "0"+bin_class
     bin_command = "01BIN"+bin_class
     
-    controlBoardPwr(n,0)
-    stat_Board = checkBoardPwr(n)
+    controlBoardPwr(0)
+    stat_Board = checkBoardPwr()
     
     if all(stat_Board) == False:
         inst.write(bin_command)
@@ -165,13 +226,16 @@ def end_of_cycle(inst,n, BIN: int, eot: bool):
         inst.write("EOCH")
         print("=========================")
         print("Testing concluded - Going to sleep")
+    return
 
-def temperaturecontrol(inst, temp: float) -> float:
+def temperaturecontrol(temp: float) -> float:
     '''
-    mode: ambient = 0; temperature = 1
-    temp: used for numerical temperature
+    setting the correct temperature for the test
+
+    Input:
+        temp: used for numerical temperature -> float
     
-    RETURN: current temperature
+    RETURN: current_temp -> float
     '''
     print("=========================")
     if not temp:
@@ -200,7 +264,7 @@ def temperaturecontrol(inst, temp: float) -> float:
             sleep(soaktime) #wait for x seconds until soaktime has elapsed
         
         while True:
-            socket_status = querySite(inst)
+            socket_status = querySite()
             if socket_status == True:
                 break
             else:
@@ -211,17 +275,24 @@ def temperaturecontrol(inst, temp: float) -> float:
     current_temp = float(current_temp)
     return current_temp 
 
-def temperaturefeedback(inst):
+def temperaturefeedback() -> float:
+    '''
+    Returns current thermohead temperature
+    
+    Input: ~
+    Output: temp -> float
+    '''
+    
     current_temp = inst.query("TMP?")
     temp = float(current_temp)
     return temp
 
-def safe_shutdown(inst,n):
-    states = checkBoardPwr(n)
+def safe_shutdown():
+    states = checkBoardPwr()
     if any(states)!=False:
-        controlBoardPwr(n,0)
+        controlBoardPwr(0)
         sleep(15)
-        states = checkBoardPwr(n)
+        states = checkBoardPwr()
     if all(states) == False:
         updateCache("0")
         inst.query("01BIN31")
@@ -235,14 +306,14 @@ def safe_shutdown(inst,n):
     for external calls
 '''
 def talos_startup(temp_program,debugmode):
-    path = "C:/Users/saschama/Desktop/Talos/cache"
+    path = "./cache"
     inst,n = initialize(temp_program,debugmode)
-    querySite(inst)
+    querySite()
     print("Measurement Program has been initialized")
     with open(path+"/sitestatus.txt","r") as f:
         state_site = int(f.readline())
         if state_site == 0:
-            status = start_handling(inst,n)
+            status = start_handling()
         else:
             print("Check for errors")
     return status
