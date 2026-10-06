@@ -109,7 +109,7 @@ def start_handling():
             ready = True
     return ready
 
-def initialize(temp,debug):
+def initialize(temp):
     '''
     Configuration of the system
     
