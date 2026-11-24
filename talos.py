@@ -4,7 +4,7 @@ Talos Hardware Control Library
 Production-ready wrapper around Talos and Netio hardware.
 
 Author:
-    AI Refactoring
+    Sascha Märtin
 
 Version:
     1.0.0
